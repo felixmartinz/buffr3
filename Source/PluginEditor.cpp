@@ -1,33 +1,182 @@
-#include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <cmath>
 
-//==============================================================================
-AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor (AudioPluginAudioProcessor& p)
-    : AudioProcessorEditor (&p), processorRef (p)
+using namespace juce;
+
+static void styleKnob (Slider& s)
 {
-    juce::ignoreUnused (processorRef);
-    // Make sure that before the constructor has finished, you've set the
-    // editor's size to whatever you need it to be.
-    setSize (400, 300);
+    s.setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
+    s.setTextBoxStyle (Slider::TextBoxBelow, true, 64, 18);
 }
 
-AudioPluginAudioProcessorEditor::~AudioPluginAudioProcessorEditor()
+Buffr3AudioProcessorEditor::Buffr3AudioProcessorEditor (Buffr3AudioProcessor& p)
+: AudioProcessorEditor (&p), proc (p),
+  recView (p, false), snapView (p, true),
+  meterPass (meterPassVal), meterLoop (meterLoopVal)
 {
+    setLookAndFeel (&lnf);
+    setOpaque (true);
+    setSize (980, 560);
+
+    // === Controls ===
+    addAndMakeVisible (midiEnabled);  aMidiEn  = std::make_unique<BAttach> (proc.getAPVTS(), "midiEnabled", midiEnabled);
+    addAndMakeVisible (hold);         aHold    = std::make_unique<BAttach> (proc.getAPVTS(), "hold", hold);
+    addAndMakeVisible (useUser);      aUseUser = std::make_unique<BAttach> (proc.getAPVTS(), "useUserSample", useUser);
+
+    // Sliders
+    squeeze.setTextValueSuffix (" %"); styleKnob (squeeze);
+    portamentoMs.setTextValueSuffix (" ms"); styleKnob (portamentoMs);
+    pbRange.setTextValueSuffix (" st"); styleKnob (pbRange);
+    playback.setTextValueSuffix (" x"); styleKnob (playback);
+    releaseMs.setTextValueSuffix (" ms"); styleKnob (releaseMs);
+    loopGain.setTextValueSuffix (" x"); styleKnob (loopGain);
+    passGain.setTextValueSuffix (" x"); styleKnob (passGain);
+    mix.setTextValueSuffix (""); styleKnob (mix);
+    latencyMs.setTextValueSuffix (" ms"); styleKnob (latencyMs);
+
+    addAndMakeVisible (squeeze);   aSqueeze  = std::make_unique<Attach> (proc.getAPVTS(), "squeeze", squeeze);
+    addAndMakeVisible (portamentoMs); aPort  = std::make_unique<Attach> (proc.getAPVTS(), "portamentoMs", portamentoMs);
+    addAndMakeVisible (pbRange);   aPbRange  = std::make_unique<Attach> (proc.getAPVTS(), "pitchBendRange", pbRange);
+    addAndMakeVisible (playback);  aPlayback = std::make_unique<Attach> (proc.getAPVTS(), "playbackSpeed", playback);
+    addAndMakeVisible (releaseMs); aRelease  = std::make_unique<Attach> (proc.getAPVTS(), "releaseMs", releaseMs);
+    addAndMakeVisible (loopGain);  aLoopGain = std::make_unique<Attach> (proc.getAPVTS(), "loopGain", loopGain);
+    addAndMakeVisible (passGain);  aPassGain = std::make_unique<Attach> (proc.getAPVTS(), "passGain", passGain);
+    addAndMakeVisible (mix);       aMix      = std::make_unique<Attach> (proc.getAPVTS(), "mix", mix);
+    addAndMakeVisible (latencyMs); aLat      = std::make_unique<Attach> (proc.getAPVTS(), "latencyCompMs", latencyMs);
+
+    // Load WAV
+    addAndMakeVisible (loadBtn);
+    loadBtn.onClick = [this]
+    {
+        FileChooser fc ("Load WAV (will be cropped/padded to 4 s)", {}, "*.wav");
+        if (fc.browseForFileToOpen())
+        {
+            String err;
+            proc.loadWavFile (fc.getResult(), err);
+            if (err.isNotEmpty()) AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Load WAV", err);
+        }
+    };
+
+    dropHint.setText ("Drop WAV here", dontSendNotification);
+    dropHint.setJustificationType (Justification::centred);
+
+    // Displays
+    addAndMakeVisible (recView);
+    addAndMakeVisible (snapView);
+
+    // Keyboard + pitch wheel
+    keyboard.setScrollButtonsVisible (false);
+    keyboard.setKeyPressBaseOctave (3);
+    keyboard.setOctaveForMiddleC (4);
+    keyboard.setAvailableRange (24, 108);
+    keyboard.setColour (MidiKeyboardComponent::keyDownOverlayColourId, Colours::cyan.withAlpha (0.35f));
+    addAndMakeVisible (keyboard);
+
+    // Route UI keyboard into processor's collector
+    kbState.addListener (&proc.getKeyboardCollector());
+
+    addAndMakeVisible (pitchWheel);
+    pitchWheel.setSliderStyle (Slider::LinearVertical);
+    pitchWheel.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+    pitchWheel.setRange (-1.0, 1.0, 0.0001);
+    pitchWheel.onValueChange = [this]
+    {
+        proc.getKeyboardCollector().addMessageToQueue (juce::MidiMessage::pitchWheel (1, (int) juce::jlimit (0, 16383, (int) std::round ((pitchWheel.getValue() * 8192.0) + 8192.0))));
+    };
+    pitchWheel.onDragEnd = [this]{ pitchWheel.setValue (0.0, dontSendNotification); };
+
+    // Meters
+    addAndMakeVisible (meterPass);
+    addAndMakeVisible (meterLoop);
+
+    startTimerHz (30);
 }
 
-//==============================================================================
-void AudioPluginAudioProcessorEditor::paint (juce::Graphics& g)
+bool Buffr3AudioProcessorEditor::isInterestedInFileDrag (const StringArray& files)
 {
-    // (Our component is opaque, so we must completely fill the background with a solid colour)
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
-
-    g.setColour (juce::Colours::white);
-    g.setFont (15.0f);
-    g.drawFittedText ("Hello World!", getLocalBounds(), juce::Justification::centred, 1);
+    for (auto& f : files) if (f.endsWithIgnoreCase (".wav")) return true;
+    return false;
 }
 
-void AudioPluginAudioProcessorEditor::resized()
+void Buffr3AudioProcessorEditor::filesDropped (const StringArray& files, int, int)
 {
-    // This is generally where you'll want to lay out the positions of any
-    // subcomponents in your editor..
+    for (auto& f : files)
+        if (f.endsWithIgnoreCase (".wav"))
+        {
+            String err; proc.loadWavFile (File (f), err);
+            if (err.isNotEmpty()) AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Load WAV", err);
+            break;
+        }
+}
+
+void Buffr3AudioProcessorEditor::timerCallback()
+{
+    // Overlay & meters
+    meterPassVal = proc.getPassthroughEnv() * 0.9 + 0.1;
+    meterLoopVal = proc.getLoopEnv() * 0.9 + 0.1;
+    repaint();
+}
+
+void Buffr3AudioProcessorEditor::paint (Graphics& g)
+{
+    // Black background (easily swapped later for an image)
+    g.fillAll (Colours::black);
+
+    // Overlay image placeholder: fade in 30 ms and fade out by release -> we use loopEnv
+    const float overlayAlpha = proc.getLoopEnv();
+    if (overlayAlpha > 0.01f)
+    {
+        g.setColour (Colours::purple.withAlpha (overlayAlpha * 0.6f));
+        auto r = getLocalBounds().toFloat();
+        g.fillRect (r.withBottom (r.getY() + r.getHeight() * 0.75f)); // bottom stripe
+    }
+
+    // Frames
+    g.setColour (Colours::white.withAlpha (0.08f));
+    g.drawRect (getLocalBounds());
+}
+
+void Buffr3AudioProcessorEditor::resized()
+{
+    auto r = getLocalBounds();
+
+    // Top: displays
+    auto top = r.removeFromTop (r.getHeight() * 0.30f);
+    recView.setBounds (top.removeFromLeft (top.getWidth() / 2).reduced (8));
+    snapView.setBounds (top.reduced (8));
+
+    // Mid: controls
+    auto mid = r.removeFromTop (r.getHeight() * 0.30f).reduced (8);
+    auto left = mid.removeFromLeft (mid.getWidth() * 0.60f);
+    auto right = mid;
+
+    auto grid = left.reduced (8);
+    const int knobW = 110, knobH = 88;
+
+    midiEnabled.setBounds (grid.removeFromTop (22)); grid.removeFromTop (8);
+    hold.setBounds       (grid.removeFromTop (22)); grid.removeFromTop (8);
+    useUser.setBounds    (grid.removeFromTop (22)); grid.removeFromTop (8);
+    loadBtn.setBounds    (grid.removeFromTop (26)); grid.removeFromTop (8);
+    dropHint.setBounds   (grid.removeFromTop (18));
+
+    squeeze.setBounds    (right.removeFromLeft (knobW).removeFromTop (knobH));
+    portamentoMs.setBounds(right.removeFromLeft (knobW).removeFromTop (knobH));
+    pbRange.setBounds    (right.removeFromLeft (knobW).removeFromTop (knobH));
+    playback.setBounds   (right.removeFromLeft (knobW).removeFromTop (knobH));
+    releaseMs.setBounds  (right.removeFromLeft (knobW).removeFromTop (knobH));
+    loopGain.setBounds   (right.removeFromLeft (knobW).removeFromTop (knobH));
+    passGain.setBounds   (right.removeFromLeft (knobW).removeFromTop (knobH));
+    mix.setBounds        (right.removeFromLeft (knobW).removeFromTop (knobH));
+    latencyMs.setBounds  (right.removeFromLeft (knobW).removeFromTop (knobH));
+
+    // Bottom: meters + keyboard + wheel
+    auto bottom = r.reduced (8);
+    auto leftK = bottom.removeFromLeft (70);
+    pitchWheel.setBounds (leftK.withTrimmedTop (20));
+
+    auto meters = bottom.removeFromTop (22);
+    meterPass.setBounds (meters.removeFromLeft (bottom.getWidth()/2).reduced (4));
+    meterLoop.setBounds (meters.reduced (4));
+
+    keyboard.setBounds (bottom.withTrimmedTop (12));
 }
