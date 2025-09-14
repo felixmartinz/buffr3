@@ -54,6 +54,8 @@ public:
     const juce::AudioBuffer<float>& getSnapshotBuffer() const { return snapBuffer; } // frozen at trigger
     int  getRecorderWritePos() const                       { return recWritePos.load(); }
     int  getSnapshotEndPos() const                         { return snapEndPos; } // end is "most recent" in snapshot
+    float getMeterPassthrough() const { return meterPassthrough; }
+    float getMeterLoop() const { return meterLoop; }
 
     // WAV handling
     bool hasUserSample() const                             { return userSampleLoaded; }

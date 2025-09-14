@@ -5,32 +5,22 @@
 // Simple glowing key look
 struct GlowKeysLnF : juce::LookAndFeel_V4
 {
-    void drawWhiteNote (int midiNoteNumber, juce::Graphics& g, juce::Rectangle<float> area,
-                        bool isDown, bool isOver, juce::Colour /*lineColour*/, juce::Colour textColour) override
+    void drawWhiteNote (int, juce::Graphics& g, juce::Rectangle<float> area,
+                        bool isDown, bool isOver, juce::Colour, juce::Colour) override
     {
-        auto base = juce::Colours::white;
-        if (isDown)
-        {
-            g.setColour (juce::Colours::cyan.withAlpha (0.7f));
-            g.fillRoundedRectangle (area.expanded (2.f), 3.f);
-        }
-        g.setColour (base);
+        if (isDown) { g.setColour (juce::Colours::cyan.withAlpha (0.7f)); g.fillRoundedRectangle (area.expanded (2.f), 3.f); }
+        g.setColour (juce::Colours::white);
         g.fillRoundedRectangle (area.reduced (2.f), 2.f);
-        if (isOver) g.setColour (juce::Colours::black.withAlpha (0.1f)), g.fillRect (area.reduced (6.f));
+        if (isOver) { g.setColour (juce::Colours::black.withAlpha (0.1f)); g.fillRect (area.reduced (6.f)); }
     }
 
-    void drawBlackNote (int /*midiNoteNumber*/, juce::Graphics& g, juce::Rectangle<float> area,
-                        bool isDown, bool isOver, juce::Colour /*noteFill*/) override
+    void drawBlackNote (int, juce::Graphics& g, juce::Rectangle<float> area,
+                        bool isDown, bool isOver, juce::Colour) override
     {
-        auto col = juce::Colours::black;
-        g.setColour (col);
+        g.setColour (juce::Colours::black);
         g.fillRoundedRectangle (area.reduced (2.f), 2.f);
-        if (isDown)
-        {
-            g.setColour (juce::Colours::cyan.withAlpha (0.7f));
-            g.fillRoundedRectangle (area.expanded (2.f), 3.f);
-        }
-        if (isOver) g.setColour (juce::Colours::white.withAlpha (0.1f)), g.fillRect (area.reduced (6.f));
+        if (isDown) { g.setColour (juce::Colours::cyan.withAlpha (0.7f)); g.fillRoundedRectangle (area.expanded (2.f), 3.f); }
+        if (isOver) { g.setColour (juce::Colours::white.withAlpha (0.1f)); g.fillRect (area.reduced (6.f)); }
     }
 };
 
@@ -52,27 +42,25 @@ public:
 
         juce::Path p; p.preallocateSpace (4096);
         const float midY = r.getCentreY();
-        const float sx = r.getWidth() / (float) N;
-        const int ch = juce::jmin (1, buf.getNumChannels()-1); // show channel 0 (or 1 if mono)
-        const float* data = buf.getReadPointer (ch);
+        const int step = juce::jmax (1, N / juce::jmax (1, (int) r.getWidth()));
+        const int ch = juce::jmin (1, buf.getNumChannels() - 1);
+        const float* data = buf.getReadPointer (juce::jmax (0, ch));
 
         p.startNewSubPath (r.getX(), midY);
-        const int step = juce::jmax (1, N / (int) r.getWidth());
         for (int x = 0, i = 0; x < (int) r.getWidth(); ++x, i += step)
         {
-            const int idx = juce::jlimit (0, N-1, i);
+            const int idx = juce::jlimit (0, N - 1, i);
             p.lineTo (r.getX() + (float) x, midY - data[idx] * (r.getHeight() * 0.48f));
         }
 
         g.setColour (juce::Colours::lightgreen);
         g.strokePath (p, juce::PathStrokeType (1.5f));
 
-        // If snapshot view, draw current loop window length
         if (showSnapshot && proc.isLoopingActive())
         {
             const float ms = proc.getCurrentLoopMs();
             g.setColour (juce::Colours::white);
-            g.drawText (juce::String (ms, 2) + " ms", r.removeFromTop (18.f), juce::Justification::centredRight, false);
+            g.drawText (juce::String (ms, 2) + " ms", getLocalBounds().removeFromTop (18), juce::Justification::centredRight, false);
         }
     }
 
@@ -82,12 +70,33 @@ private:
     bool showSnapshot = false;
 };
 
+// Forwards on-screen keyboard events into the processor's MidiMessageCollector
+struct KBForwarder : public juce::MidiKeyboardStateListener
+{
+    explicit KBForwarder (Buffr3AudioProcessor& p) : proc (p) {}
+
+    void handleNoteOn (juce::MidiKeyboardState*, int chan, int note, float vel) override
+    {
+        auto m = juce::MidiMessage::noteOn (chan, note, (juce::uint8) juce::jlimit (0, 127, (int) std::lround (vel * 127.0f)));
+        m.setTimeStamp (juce::Time::getMillisecondCounterHiRes() * 0.001);
+        proc.getKeyboardCollector().addMessageToQueue (m);
+    }
+    void handleNoteOff (juce::MidiKeyboardState*, int chan, int note, float) override
+    {
+        auto m = juce::MidiMessage::noteOff (chan, note);
+        m.setTimeStamp (juce::Time::getMillisecondCounterHiRes() * 0.001);
+        proc.getKeyboardCollector().addMessageToQueue (m);
+    }
+    Buffr3AudioProcessor& proc;
+};
+
 class Buffr3AudioProcessorEditor : public juce::AudioProcessorEditor,
                                    private juce::Timer,
                                    private juce::FileDragAndDropTarget
 {
 public:
     explicit Buffr3AudioProcessorEditor (Buffr3AudioProcessor&);
+    ~Buffr3AudioProcessorEditor() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -119,9 +128,10 @@ private:
 
     // Keyboard + pitch wheel
     GlowKeysLnF lnf;
-    juce::MidiKeyboardState kbState; // UI state
+    juce::MidiKeyboardState kbState;
     juce::MidiKeyboardComponent keyboard { kbState, juce::MidiKeyboardComponent::horizontalKeyboard };
     juce::Slider pitchWheel; // -1..+1 springs to center
+    std::unique_ptr<KBForwarder> kbForwarder;
 
     // Displays
     WaveView recView, snapView;
@@ -137,5 +147,4 @@ private:
     std::unique_ptr<BAttach> aMidiEn, aHold, aUseUser;
 
     void timerCallback() override;
-    void wireSlider (juce::Slider& s, const juce::String& suffix, double min, double max, double inc, double init, bool integer = false);
 };

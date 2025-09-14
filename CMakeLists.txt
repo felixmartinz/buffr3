@@ -1,21 +1,21 @@
 cmake_minimum_required(VERSION 3.22)
 project(Buffr3 VERSION 1.0.0)
 
-# Fetch JUCE automatically if it's not already added as a subdir in your repo.
+# --- Get JUCE with the macOS 15 / Xcode 16 fixes ---
 include(FetchContent)
-set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
+set(FETCHCONTENT_UPDATES_DISCONNECTED OFF)
 FetchContent_Declare(
   juce
   GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-  GIT_TAG 7.0.12  # known-good with CMake; change if you pin JUCE elsewhere
+  GIT_TAG 8.0.9   # includes ScreenCaptureKit fix for juceaide on macOS 15+
 )
 FetchContent_MakeAvailable(juce)
 
-# ---- Plugin target ----
+# --- Plugin target ---
 juce_add_plugin(Buffr3
-    COMPANY_NAME            "Badsound"
-    PLUGIN_MANUFACTURER     "Badsound"
-    PLUGIN_CODE             BfR3           # 4 chars
+    COMPANY_NAME            "Nørdlight"
+    PLUGIN_MANUFACTURER     "Nørdlight"
+    PLUGIN_CODE             BfR3
     PRODUCT_NAME            "Buffr3"
     COPY_PLUGIN_AFTER_BUILD TRUE
     FORMATS                 VST3 AU        # AU only builds on macOS
@@ -24,9 +24,6 @@ juce_add_plugin(Buffr3
     NEEDS_MIDI_OUTPUT       FALSE
     IS_MIDI_EFFECT          FALSE
     AU_MAIN_TYPE            kAudioUnitType_MusicEffect
-    PLUGIN_HOST_IA          FALSE
-    # Mono and Stereo
-    PLUGIN_CHANNEL_CONFIGURATIONS "1,1" "2,2"
 )
 
 target_sources(Buffr3 PRIVATE
@@ -46,8 +43,8 @@ target_compile_definitions(Buffr3 PRIVATE
 )
 
 target_link_libraries(Buffr3 PRIVATE
-    juce::juce_audio_utils      # MidiKeyboardComponent, meters helper
+    juce::juce_audio_utils      # MidiKeyboardComponent, basic meters helper
     juce::juce_audio_formats    # WAV loading/saving
-    juce::juce_dsp              # Smoothed values, etc.
+    juce::juce_dsp
     juce::juce_gui_extra
 )

@@ -23,7 +23,6 @@ Buffr3AudioProcessorEditor::Buffr3AudioProcessorEditor (Buffr3AudioProcessor& p)
     addAndMakeVisible (hold);         aHold    = std::make_unique<BAttach> (proc.getAPVTS(), "hold", hold);
     addAndMakeVisible (useUser);      aUseUser = std::make_unique<BAttach> (proc.getAPVTS(), "useUserSample", useUser);
 
-    // Sliders
     squeeze.setTextValueSuffix (" %"); styleKnob (squeeze);
     portamentoMs.setTextValueSuffix (" ms"); styleKnob (portamentoMs);
     pbRange.setTextValueSuffix (" st"); styleKnob (pbRange);
@@ -34,15 +33,15 @@ Buffr3AudioProcessorEditor::Buffr3AudioProcessorEditor (Buffr3AudioProcessor& p)
     mix.setTextValueSuffix (""); styleKnob (mix);
     latencyMs.setTextValueSuffix (" ms"); styleKnob (latencyMs);
 
-    addAndMakeVisible (squeeze);   aSqueeze  = std::make_unique<Attach> (proc.getAPVTS(), "squeeze", squeeze);
-    addAndMakeVisible (portamentoMs); aPort  = std::make_unique<Attach> (proc.getAPVTS(), "portamentoMs", portamentoMs);
-    addAndMakeVisible (pbRange);   aPbRange  = std::make_unique<Attach> (proc.getAPVTS(), "pitchBendRange", pbRange);
-    addAndMakeVisible (playback);  aPlayback = std::make_unique<Attach> (proc.getAPVTS(), "playbackSpeed", playback);
-    addAndMakeVisible (releaseMs); aRelease  = std::make_unique<Attach> (proc.getAPVTS(), "releaseMs", releaseMs);
-    addAndMakeVisible (loopGain);  aLoopGain = std::make_unique<Attach> (proc.getAPVTS(), "loopGain", loopGain);
-    addAndMakeVisible (passGain);  aPassGain = std::make_unique<Attach> (proc.getAPVTS(), "passGain", passGain);
-    addAndMakeVisible (mix);       aMix      = std::make_unique<Attach> (proc.getAPVTS(), "mix", mix);
-    addAndMakeVisible (latencyMs); aLat      = std::make_unique<Attach> (proc.getAPVTS(), "latencyCompMs", latencyMs);
+    addAndMakeVisible (squeeze);     aSqueeze  = std::make_unique<Attach> (proc.getAPVTS(), "squeeze", squeeze);
+    addAndMakeVisible (portamentoMs);aPort     = std::make_unique<Attach> (proc.getAPVTS(), "portamentoMs", portamentoMs);
+    addAndMakeVisible (pbRange);     aPbRange  = std::make_unique<Attach> (proc.getAPVTS(), "pitchBendRange", pbRange);
+    addAndMakeVisible (playback);    aPlayback = std::make_unique<Attach> (proc.getAPVTS(), "playbackSpeed", playback);
+    addAndMakeVisible (releaseMs);   aRelease  = std::make_unique<Attach> (proc.getAPVTS(), "releaseMs", releaseMs);
+    addAndMakeVisible (loopGain);    aLoopGain = std::make_unique<Attach> (proc.getAPVTS(), "loopGain", loopGain);
+    addAndMakeVisible (passGain);    aPassGain = std::make_unique<Attach> (proc.getAPVTS(), "passGain", passGain);
+    addAndMakeVisible (mix);         aMix      = std::make_unique<Attach> (proc.getAPVTS(), "mix", mix);
+    addAndMakeVisible (latencyMs);   aLat      = std::make_unique<Attach> (proc.getAPVTS(), "latencyCompMs", latencyMs);
 
     // Load WAV
     addAndMakeVisible (loadBtn);
@@ -72,8 +71,9 @@ Buffr3AudioProcessorEditor::Buffr3AudioProcessorEditor (Buffr3AudioProcessor& p)
     keyboard.setColour (MidiKeyboardComponent::keyDownOverlayColourId, Colours::cyan.withAlpha (0.35f));
     addAndMakeVisible (keyboard);
 
-    // Route UI keyboard into processor's collector
-    kbState.addListener (&proc.getKeyboardCollector());
+    // Route on-screen keyboard to the processor
+    kbForwarder = std::make_unique<KBForwarder> (proc);
+    kbState.addListener (kbForwarder.get());
 
     addAndMakeVisible (pitchWheel);
     pitchWheel.setSliderStyle (Slider::LinearVertical);
@@ -81,15 +81,24 @@ Buffr3AudioProcessorEditor::Buffr3AudioProcessorEditor (Buffr3AudioProcessor& p)
     pitchWheel.setRange (-1.0, 1.0, 0.0001);
     pitchWheel.onValueChange = [this]
     {
-        proc.getKeyboardCollector().addMessageToQueue (juce::MidiMessage::pitchWheel (1, (int) juce::jlimit (0, 16383, (int) std::round ((pitchWheel.getValue() * 8192.0) + 8192.0))));
+        const int value = juce::jlimit (0, 16383, (int) std::lround ((pitchWheel.getValue() * 8192.0) + 8192.0));
+        auto m = juce::MidiMessage::pitchWheel (1, value);
+        m.setTimeStamp (juce::Time::getMillisecondCounterHiRes() * 0.001);
+        proc.getKeyboardCollector().addMessageToQueue (m);
     };
-    pitchWheel.onDragEnd = [this]{ pitchWheel.setValue (0.0, dontSendNotification); };
+    pitchWheel.onDragEnd = [this] { pitchWheel.setValue (0.0, dontSendNotification); };
 
     // Meters
     addAndMakeVisible (meterPass);
     addAndMakeVisible (meterLoop);
 
     startTimerHz (30);
+}
+
+Buffr3AudioProcessorEditor::~Buffr3AudioProcessorEditor()
+{
+    kbState.removeListener (kbForwarder.get());
+    setLookAndFeel (nullptr);
 }
 
 bool Buffr3AudioProcessorEditor::isInterestedInFileDrag (const StringArray& files)
@@ -111,27 +120,25 @@ void Buffr3AudioProcessorEditor::filesDropped (const StringArray& files, int, in
 
 void Buffr3AudioProcessorEditor::timerCallback()
 {
-    // Overlay & meters
-    meterPassVal = proc.getPassthroughEnv() * 0.9 + 0.1;
-    meterLoopVal = proc.getLoopEnv() * 0.9 + 0.1;
+    // Show real RMS meters exposed by the processor
+    meterPassVal = proc.getMeterPassthrough();
+    meterLoopVal = proc.getMeterLoop();
     repaint();
 }
 
 void Buffr3AudioProcessorEditor::paint (Graphics& g)
 {
-    // Black background (easily swapped later for an image)
     g.fillAll (Colours::black);
 
-    // Overlay image placeholder: fade in 30 ms and fade out by release -> we use loopEnv
+    // Overlay image placeholder driven by loop envelope
     const float overlayAlpha = proc.getLoopEnv();
     if (overlayAlpha > 0.01f)
     {
         g.setColour (Colours::purple.withAlpha (overlayAlpha * 0.6f));
         auto r = getLocalBounds().toFloat();
-        g.fillRect (r.withBottom (r.getY() + r.getHeight() * 0.75f)); // bottom stripe
+        g.fillRect (r.withBottom (r.getY() + r.getHeight() * 0.75f));
     }
 
-    // Frames
     g.setColour (Colours::white.withAlpha (0.08f));
     g.drawRect (getLocalBounds());
 }

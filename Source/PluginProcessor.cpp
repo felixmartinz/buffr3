@@ -31,9 +31,6 @@ Buffr3AudioProcessor::Buffr3AudioProcessor()
 : AudioProcessor (BusesProperties()
                   .withInput  ("Input",  AudioChannelSet::stereo(), true)
                   .withOutput ("Output", AudioChannelSet::stereo(), true))
-{
-    keyboardCollector.reset (sampleRate, getBlockSize());
-}
 
 bool Buffr3AudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
@@ -418,17 +415,32 @@ void Buffr3AudioProcessor::mixPassthrough (AudioBuffer<float>& inout, int numSam
 
 void Buffr3AudioProcessor::handleMidi (MidiBuffer& midi, int /*numSamples*/)
 {
-    const bool midiEnabled = *apvts.getRawParameterValue ("midiEnabled") > 0.5f;
+    const bool midiEnabled    = *apvts.getRawParameterValue ("midiEnabled") > 0.5f;
+    const bool holdParam      = *apvts.getRawParameterValue ("hold") > 0.5f;
+    const bool useUserSample  = *apvts.getRawParameterValue ("useUserSample") > 0.5f;
+    const int  latencySamples = (int) std::round ((*apvts.getRawParameterValue ("latencyCompMs") / 1000.0f) * sampleRate);
 
-    MidiBuffer filtered;
     for (const auto meta : midi)
     {
         const auto m = meta.getMessage();
+
         if (m.isNoteOn())
         {
             notesDown = std::max (0, notesDown + 1);
             if (midiEnabled)
                 lastNoteNumber = m.getNoteNumber();
+
+            // Snapshot on every note-on unless HOLD is intentionally pinning content,
+            // or we're using a user-loaded WAV instead of the live recorder.
+            if (!holdParam && !useUserSample)
+                snapshotRecorder (latencySamples);
+
+            // If we were in release, go back to full loop quickly
+            if (looping.load())
+            {
+                loopEnv.setTargetValue (1.f);
+                passthroughMuteEnv.setTargetValue (0.f);
+            }
         }
         else if (m.isNoteOff())
         {
@@ -440,11 +452,8 @@ void Buffr3AudioProcessor::handleMidi (MidiBuffer& midi, int /*numSamples*/)
             const float norm = (val - 8192) / 8192.0f; // -1..+1
             pitchBendNorm.store (juce::jlimit (-1.0f, 1.0f, norm));
         }
-
-        // We don't forward MIDI downstream
-        (void) filtered;
     }
-    // nothing returned since we clear midi in processBlock
+    // We clear MIDI later in processBlock (no MIDI out).
 }
 
 // ===================== Editor factory =====================
