@@ -71,7 +71,7 @@ void Buffr3AudioProcessor::prepareToPlay (double sr, int samplesPerBlock)
     glideHz.reset (sampleRate, 0.001);
     glideHz.setCurrentAndTargetValue (440.0);
 
-    keyboardCollector.reset (sampleRate, samplesPerBlock);
+    keyboardCollector.reset (sampleRate);
 }
 
 void Buffr3AudioProcessor::getStateInformation (MemoryBlock& destData)
@@ -98,7 +98,8 @@ void Buffr3AudioProcessor::getStateInformation (MemoryBlock& destData)
 void Buffr3AudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     MemoryInputStream mis (data, (size_t) sizeInBytes, false);
-    if (auto tree = ValueTree::readFromStream (mis))
+    auto tree = juce::ValueTree::readFromStream (mis);
+    if (tree.isValid())
         apvts.replaceState (tree);
 
     const bool hadUserSample = mis.readBool();

@@ -46,14 +46,22 @@ Buffr3AudioProcessorEditor::Buffr3AudioProcessorEditor (Buffr3AudioProcessor& p)
     // Load WAV
     addAndMakeVisible (loadBtn);
     loadBtn.onClick = [this]
+    loadBtn.onClick = [this]
     {
-        FileChooser fc ("Load WAV (will be cropped/padded to 4 s)", {}, "*.wav");
-        if (fc.browseForFileToOpen())
-        {
-            String err;
-            proc.loadWavFile (fc.getResult(), err);
-            if (err.isNotEmpty()) AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Load WAV", err);
-        }
+        juce::FileChooser chooser ("Load WAV (will be cropped/padded to 4 s)", {}, "*.wav");
+        chooser.launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                             [this] (const juce::FileChooser& fc)
+                             {
+                                 auto file = fc.getResult();
+                                 if (file.existsAsFile())
+                                 {
+                                     juce::String err;
+                                     proc.loadWavFile (file, err);
+                                     if (err.isNotEmpty())
+                                         juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
+                                                                                  "Load WAV", err);
+                                 }
+                             });
     };
 
     dropHint.setText ("Drop WAV here", dontSendNotification);

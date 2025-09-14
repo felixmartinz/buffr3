@@ -5,25 +5,30 @@
 #include "PluginProcessor.h"
 
 // Simple glowing key look
-struct GlowKeysLnF : juce::LookAndFeel_V4
+class GlowKeysLnF : public juce::LookAndFeel_V4
 {
-    void drawWhiteNote (int, juce::Graphics& g, juce::Rectangle<float> area,
-                        bool isDown, bool isOver, juce::Colour, juce::Colour) override
-    {
-        if (isDown) { g.setColour (juce::Colours::cyan.withAlpha (0.7f)); g.fillRoundedRectangle (area.expanded (2.f), 3.f); }
-        g.setColour (juce::Colours::white);
-        g.fillRoundedRectangle (area.reduced (2.f), 2.f);
-        if (isOver) { g.setColour (juce::Colours::black.withAlpha (0.1f)); g.fillRect (area.reduced (6.f)); }
-    }
+public:
+    GlowKeysLnF() = default;
 
-    void drawBlackNote (int, juce::Graphics& g, juce::Rectangle<float> area,
-                        bool isDown, bool isOver, juce::Colour) override
-    {
-        g.setColour (juce::Colours::black);
-        g.fillRoundedRectangle (area.reduced (2.f), 2.f);
-        if (isDown) { g.setColour (juce::Colours::cyan.withAlpha (0.7f)); g.fillRoundedRectangle (area.expanded (2.f), 3.f); }
-        if (isOver) { g.setColour (juce::Colours::white.withAlpha (0.1f)); g.fillRect (area.reduced (6.f)); }
-    }
+    // Matches JUCE's current LookAndFeel hooks for MidiKeyboardComponent
+    void drawWhiteNote (int /*midiNoteNumber*/,
+                        juce::Graphics& g,
+                        juce::Rectangle<float> area,
+                        bool isDown,
+                        bool isOver,
+                        juce::Colour lineColour,
+                        juce::Colour textColour) override;
+
+    void drawBlackNote (int /*midiNoteNumber*/,
+                        juce::Graphics& g,
+                        juce::Rectangle<float> area,
+                        bool isDown,
+                        bool isOver,
+                        juce::Colour noteFillColour) override;
+
+private:
+    float whiteKeyRoundedDiff = 8.0f;
+    float blackKeyRoundedDiff = 12.0f;
 };
 
 // Wave display for recorder/snapshot
