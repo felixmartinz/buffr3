@@ -8,27 +8,29 @@
 class GlowKeysLnF : public juce::LookAndFeel_V4
 {
 public:
-    GlowKeysLnF() = default;
-
-    // Matches JUCE's current LookAndFeel hooks for MidiKeyboardComponent
-    void drawWhiteNote (int /*midiNoteNumber*/,
+    // NOTE: JUCE’s signatures include a reference to the keyboard component.
+    void drawWhiteNote (int midiNoteNumber,
                         juce::Graphics& g,
                         juce::Rectangle<float> area,
                         bool isDown,
                         bool isOver,
                         juce::Colour lineColour,
-                        juce::Colour textColour) override;
+                        juce::Colour textColour,
+                        juce::MidiKeyboardComponent& keyboard) override;
 
-    void drawBlackNote (int /*midiNoteNumber*/,
+    void drawBlackNote (int midiNoteNumber,
                         juce::Graphics& g,
                         juce::Rectangle<float> area,
                         bool isDown,
                         bool isOver,
-                        juce::Colour noteFillColour) override;
+                        juce::Colour noteFillColour,
+                        juce::MidiKeyboardComponent& keyboard) override;
+
+    // (Optional helper you may have added; keep yours if you already have one)
+    void setGlowColour (juce::Colour c) { glowColour = c; }
 
 private:
-    float whiteKeyRoundedDiff = 8.0f;
-    float blackKeyRoundedDiff = 12.0f;
+    juce::Colour glowColour { juce::Colours::orange.withAlpha (0.55f) };
 };
 
 // Wave display for recorder/snapshot
@@ -134,7 +136,7 @@ private:
     juce::Label      dropHint;
 
     // Keyboard + pitch wheel
-    GlowKeysLnF lnf;
+    GlowKeysLnF glowKeysLnf;
     juce::MidiKeyboardState kbState;
     juce::MidiKeyboardComponent keyboard { kbState, juce::MidiKeyboardComponent::horizontalKeyboard };
     juce::Slider pitchWheel; // -1..+1 springs to center

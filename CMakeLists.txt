@@ -13,8 +13,8 @@ FetchContent_MakeAvailable(juce)
 
 # --- Plugin target ---
 juce_add_plugin(Buffr3
-    COMPANY_NAME            "Nørdlight"
-    PLUGIN_MANUFACTURER     "Nørdlight"
+    COMPANY_NAME            "Badsound"
+    PLUGIN_MANUFACTURER     "Badsound"
     PLUGIN_CODE             BfR3
     PRODUCT_NAME            "Buffr3"
     COPY_PLUGIN_AFTER_BUILD TRUE

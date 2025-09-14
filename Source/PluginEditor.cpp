@@ -46,7 +46,6 @@ Buffr3AudioProcessorEditor::Buffr3AudioProcessorEditor (Buffr3AudioProcessor& p)
     // Load WAV
     addAndMakeVisible (loadBtn);
     loadBtn.onClick = [this]
-    loadBtn.onClick = [this]
     {
         juce::FileChooser chooser ("Load WAV (will be cropped/padded to 4 s)", {}, "*.wav");
         chooser.launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
@@ -78,6 +77,7 @@ Buffr3AudioProcessorEditor::Buffr3AudioProcessorEditor (Buffr3AudioProcessor& p)
     keyboard.setAvailableRange (24, 108);
     keyboard.setColour (MidiKeyboardComponent::keyDownOverlayColourId, Colours::cyan.withAlpha (0.35f));
     addAndMakeVisible (keyboard);
+    keyboard.setLookAndFeel (&glowKeysLnf);
 
     // Route on-screen keyboard to the processor
     kbForwarder = std::make_unique<KBForwarder> (proc);
@@ -103,9 +103,67 @@ Buffr3AudioProcessorEditor::Buffr3AudioProcessorEditor (Buffr3AudioProcessor& p)
     startTimerHz (30);
 }
 
+void GlowKeysLnF::drawWhiteNote (int midiNoteNumber,
+                                 juce::Graphics& g,
+                                 juce::Rectangle<float> area,
+                                 bool isDown,
+                                 bool isOver,
+                                 juce::Colour lineColour,
+                                 juce::Colour textColour,
+                                 juce::MidiKeyboardComponent& /*keyboard*/)
+{
+    // Base key
+    g.setColour (juce::Colours::white);
+    g.fillRect (area);
+
+    // Key border
+    g.setColour (lineColour);
+    g.drawRect (area, 1.0f);
+
+    // “Glow” overlay on hover/down
+    if (isOver || isDown)
+    {
+        auto glow = area.reduced (area.getWidth() * 0.1f, area.getHeight() * 0.2f);
+        g.setColour (glowColour);
+        g.fillEllipse (glow);
+    }
+
+    // Optional label (note name)
+    g.setColour (textColour);
+    g.setFont (12.0f);
+    const auto name = juce::MidiMessage::getMidiNoteName (midiNoteNumber, true, true, 4);
+    g.drawFittedText (name, area.toNearestInt(), juce::Justification::centredBottom, 1);
+}
+
+void GlowKeysLnF::drawBlackNote (int /*midiNoteNumber*/,
+                                 juce::Graphics& g,
+                                 juce::Rectangle<float> area,
+                                 bool isDown,
+                                 bool isOver,
+                                 juce::Colour noteFillColour,
+                                 juce::MidiKeyboardComponent& /*keyboard*/)
+{
+    // Base key
+    g.setColour (noteFillColour);
+    g.fillRect (area);
+
+    // Subtle highlight for glow
+    if (isOver || isDown)
+    {
+        auto glow = area.reduced (area.getWidth() * 0.15f, area.getHeight() * 0.25f);
+        g.setColour (glowColour);
+        g.fillEllipse (glow);
+    }
+
+    // Edge
+    g.setColour (juce::Colours::black);
+    g.drawRect (area, 1.0f);
+}
+
 Buffr3AudioProcessorEditor::~Buffr3AudioProcessorEditor()
 {
     kbState.removeListener (kbForwarder.get());
+    keyboard.setLookAndFeel (nullptr);
     setLookAndFeel (nullptr);
 }
 

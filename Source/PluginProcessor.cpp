@@ -33,14 +33,18 @@ Buffr3AudioProcessor::Buffr3AudioProcessor()
                   .withInput  ("Input",  AudioChannelSet::stereo(), true)
                   .withOutput ("Output", AudioChannelSet::stereo(), true))
 
-bool Buffr3AudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool Buffr3AudioProcessor::isBusesLayoutSupported (const juce::AudioProcessor::BusesLayout& layouts) const
 {
     const auto in  = layouts.getMainInputChannelSet();
     const auto out = layouts.getMainOutputChannelSet();
-    if (in.isDisabled() || out.isDisabled()) return false;
-    if (!(in == AudioChannelSet::mono() || in == AudioChannelSet::stereo())) return false;
-    return in == out;
+
+    // Allow mono or stereo, and require matching in/out
+    if (in.isDisabled() || out.isDisabled())
+        return false;
+
+    return (in == out) && (in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo());
 }
+
 
 // ===================== Prepare / Release =====================
 void Buffr3AudioProcessor::prepareToPlay (double sr, int samplesPerBlock)
@@ -98,8 +102,7 @@ void Buffr3AudioProcessor::getStateInformation (MemoryBlock& destData)
 void Buffr3AudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     MemoryInputStream mis (data, (size_t) sizeInBytes, false);
-    auto tree = juce::ValueTree::readFromStream (mis);
-    if (tree.isValid())
+    if (auto tree = juce::ValueTree::readFromStream (mis); tree.isValid())
         apvts.replaceState (tree);
 
     const bool hadUserSample = mis.readBool();
