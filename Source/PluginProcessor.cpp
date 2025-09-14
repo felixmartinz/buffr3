@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <cstring> // for std::memcpy used in snapshotRecorder()
 
 using namespace juce;
 
