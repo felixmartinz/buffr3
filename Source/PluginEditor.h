@@ -1,159 +1,152 @@
 #pragma once
+
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "PluginProcessor.h"
 
-// Simple glowing key look
-class GlowKeysLnF : public juce::LookAndFeel_V4
-{
-public:
-    // NOTE: JUCE’s signatures include a reference to the keyboard component.
-    void drawWhiteNote (int midiNoteNumber,
-                        juce::Graphics& g,
-                        juce::Rectangle<float> area,
-                        bool isDown,
-                        bool isOver,
-                        juce::Colour lineColour,
-                        juce::Colour textColour,
-                        juce::MidiKeyboardComponent& keyboard) override;
-
-    void drawBlackNote (int midiNoteNumber,
-                        juce::Graphics& g,
-                        juce::Rectangle<float> area,
-                        bool isDown,
-                        bool isOver,
-                        juce::Colour noteFillColour,
-                        juce::MidiKeyboardComponent& keyboard) override;
-
-    // (Optional helper you may have added; keep yours if you already have one)
-    void setGlowColour (juce::Colour c) { glowColour = c; }
-
-private:
-    juce::Colour glowColour { juce::Colours::orange.withAlpha (0.55f) };
-};
-
-// Wave display for recorder/snapshot
-class WaveView : public juce::Component, private juce::Timer
-{
-public:
-    WaveView (const Buffr3AudioProcessor& p, bool snapshotView) : proc (p), showSnapshot (snapshotView) { startTimerHz (30); }
-
-    void paint (juce::Graphics& g) override
-    {
-        g.fillAll (juce::Colours::black);
-
-        const auto& buf = showSnapshot ? proc.getSnapshotBuffer() : proc.getRecordBuffer();
-        const int N = buf.getNumSamples(); if (N <= 0) return;
-
-        auto r = getLocalBounds().toFloat().reduced (4.f);
-        g.setColour (juce::Colours::dimgrey); g.drawRoundedRectangle (r, 6.f, 1.0f);
-
-        juce::Path p; p.preallocateSpace (4096);
-        const float midY = r.getCentreY();
-        const int step = juce::jmax (1, N / juce::jmax (1, (int) r.getWidth()));
-        const int ch = juce::jmin (1, buf.getNumChannels() - 1);
-        const float* data = buf.getReadPointer (juce::jmax (0, ch));
-
-        p.startNewSubPath (r.getX(), midY);
-        for (int x = 0, i = 0; x < (int) r.getWidth(); ++x, i += step)
-        {
-            const int idx = juce::jlimit (0, N - 1, i);
-            p.lineTo (r.getX() + (float) x, midY - data[idx] * (r.getHeight() * 0.48f));
-        }
-
-        g.setColour (juce::Colours::lightgreen);
-        g.strokePath (p, juce::PathStrokeType (1.5f));
-
-        if (showSnapshot && proc.isLoopingActive())
-        {
-            const float ms = proc.getCurrentLoopMs();
-            g.setColour (juce::Colours::white);
-            g.drawText (juce::String (ms, 2) + " ms", getLocalBounds().removeFromTop (18), juce::Justification::centredRight, false);
-        }
-    }
-
-private:
-    void timerCallback() override { repaint(); }
-    const Buffr3AudioProcessor& proc;
-    bool showSnapshot = false;
-};
-
-// Forwards on-screen keyboard events into the processor's MidiMessageCollector
-struct KBForwarder : public juce::MidiKeyboardStateListener
-{
-    explicit KBForwarder (Buffr3AudioProcessor& p) : proc (p) {}
-
-    void handleNoteOn (juce::MidiKeyboardState*, int chan, int note, float vel) override
-    {
-        auto m = juce::MidiMessage::noteOn (chan, note, (juce::uint8) juce::jlimit (0, 127, (int) std::lround (vel * 127.0f)));
-        m.setTimeStamp (juce::Time::getMillisecondCounterHiRes() * 0.001);
-        proc.getKeyboardCollector().addMessageToQueue (m);
-    }
-    void handleNoteOff (juce::MidiKeyboardState*, int chan, int note, float) override
-    {
-        auto m = juce::MidiMessage::noteOff (chan, note);
-        m.setTimeStamp (juce::Time::getMillisecondCounterHiRes() * 0.001);
-        proc.getKeyboardCollector().addMessageToQueue (m);
-    }
-    Buffr3AudioProcessor& proc;
-};
-
 class Buffr3AudioProcessorEditor : public juce::AudioProcessorEditor,
-                                   private juce::Timer,
-                                   private juce::FileDragAndDropTarget
+                                  public juce::Timer,
+                                  public juce::MidiInputCallback,
+                                  public juce::MidiKeyboardStateListener,
+                                  public juce::FileDragAndDropTarget
 {
 public:
-    explicit Buffr3AudioProcessorEditor (Buffr3AudioProcessor&);
+    Buffr3AudioProcessorEditor (Buffr3AudioProcessor&);
     ~Buffr3AudioProcessorEditor() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
-
-    // Drag-and-drop WAV
+    void timerCallback() override;
+    
+    // MidiInputCallback methods
+    void handleIncomingMidiMessage (juce::MidiInput* source,
+                                   const juce::MidiMessage& message) override;
+    
+    // MidiKeyboardStateListener methods
+    void handleNoteOn (juce::MidiKeyboardState*,
+                      int midiChannel, int midiNoteNumber, float velocity) override;
+    void handleNoteOff (juce::MidiKeyboardState*,
+                       int midiChannel, int midiNoteNumber, float velocity) override;
+    
+    // FileDragAndDropTarget methods
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
-    void filesDropped (const juce::StringArray& files, int, int) override;
+    void filesDropped (const juce::StringArray& files, int x, int y) override;
 
 private:
-    Buffr3AudioProcessor& proc;
-
-    // Controls
-    juce::ToggleButton midiEnabled { "MIDI Enabled" };
-    juce::ToggleButton hold        { "Hold" };
-    juce::ToggleButton useUser     { "Use Loaded WAV" };
-
-    juce::Slider squeeze;       // 0..100 (log mapped internally)
-    juce::Slider portamentoMs;
-    juce::Slider pbRange;
-    juce::Slider playback;
-    juce::Slider releaseMs;
-    juce::Slider loopGain;
-    juce::Slider passGain;
-    juce::Slider mix;
-    juce::Slider latencyMs;
-
-    juce::TextButton loadBtn { "Load WAV…" };
-    juce::Label      dropHint;
-
-    // Keyboard + pitch wheel
-    GlowKeysLnF glowKeysLnf;
-    juce::MidiKeyboardState kbState;
-    juce::MidiKeyboardComponent keyboard { kbState, juce::MidiKeyboardComponent::horizontalKeyboard };
-    juce::Slider pitchWheel; // -1..+1 springs to center
-    std::unique_ptr<KBForwarder> kbForwarder;
-
-    // Displays
-    WaveView recView, snapView;
-
-    // Meters
-    juce::ProgressBar meterPass, meterLoop;
-    double meterPassVal = 0.0, meterLoopVal = 0.0;
-
+    Buffr3AudioProcessor& audioProcessor;
+    
+    // Waveform display
+    juce::Path waveformPath;
+    juce::Path loopWaveformPath;
+    bool isLooping = false;
+    
+    // Components
+    juce::Slider portamentoSlider;
+    juce::Slider pitchBendRangeSlider;
+    juce::Slider playbackSpeedSlider;
+    juce::Slider releaseSlider;
+    juce::Slider squeezeSlider;
+    juce::Slider squeezeGainSlider;
+    juce::Slider passthroughGainSlider;
+    juce::Slider wetDryMixSlider;
+    
+    juce::ToggleButton holdButton;
+    juce::ToggleButton midiDisableButton;
+    juce::ToggleButton useWavFileButton;
+    
+    juce::Label loopDurationLabel;
+    juce::Label portamentoLabel;
+    juce::Label pitchBendRangeLabel;
+    juce::Label playbackSpeedLabel;
+    juce::Label releaseLabel;
+    juce::Label squeezeLabel;
+    juce::Label squeezeGainLabel;
+    juce::Label passthroughGainLabel;
+    juce::Label wetDryMixLabel;
+    
+    // File drop area
+    juce::Rectangle<int> fileDropArea;
+    juce::File loadedFile;
+    juce::TextButton loadFileButton;
+    
+    // MIDI keyboard
+    juce::MidiKeyboardState keyboardState;
+    juce::MidiKeyboardComponent keyboard;
+    
+    // Pitch wheel
+    juce::Slider pitchWheel;
+    
+    // Level meters
+    class LevelMeter : public juce::Component, public juce::Timer
+    {
+    public:
+        LevelMeter() { startTimerHz(30); }
+        
+        void paint(juce::Graphics& g) override
+        {
+            auto bounds = getLocalBounds().toFloat();
+            
+            g.setColour(juce::Colours::darkgrey);
+            g.fillRoundedRectangle(bounds, 2.0f);
+            
+            if (level > 0.0f)
+            {
+                auto fillHeight = bounds.getHeight() * level;
+                auto fillBounds = bounds.removeFromBottom(fillHeight);
+                
+                auto colour = level > 0.9f ? juce::Colours::red :
+                             level > 0.7f ? juce::Colours::orange :
+                                          juce::Colours::green;
+                g.setColour(colour);
+                g.fillRoundedRectangle(fillBounds, 2.0f);
+            }
+        }
+        
+        void timerCallback() override
+        {
+            if (currentLevel != targetLevel)
+            {
+                currentLevel = currentLevel * 0.8f + targetLevel * 0.2f;
+                level = currentLevel;
+                repaint();
+            }
+        }
+        
+        void setLevel(float newLevel)
+        {
+            targetLevel = juce::jlimit(0.0f, 1.0f, newLevel);
+        }
+        
+    private:
+        float level = 0.0f;
+        float currentLevel = 0.0f;
+        float targetLevel = 0.0f;
+    };
+    
+    LevelMeter passthroughMeter;
+    LevelMeter squeezeMeter;
+    
+    // Background images
+    juce::Image backgroundImage;
+    juce::Image loopingImage;
+    float loopingImageAlpha = 0.0f;
+    
     // Attachments
-    using Attach = juce::AudioProcessorValueTreeState::SliderAttachment;
-    using BAttach = juce::AudioProcessorValueTreeState::ButtonAttachment;
-    std::unique_ptr<Attach> aSqueeze, aPort, aPbRange, aPlayback, aRelease, aLoopGain, aPassGain, aMix, aLat;
-    std::unique_ptr<BAttach> aMidiEn, aHold, aUseUser;
-
-    void timerCallback() override;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> portamentoAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> pitchBendRangeAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> playbackSpeedAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> releaseAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> squeezeAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> squeezeGainAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> passthroughGainAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> wetDryMixAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> holdAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> midiDisableAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> useWavFileAttachment;
+    
+    void updateWaveformDisplay();
+    void loadWavFile(const juce::File& file);
+    
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Buffr3AudioProcessorEditor)
 };

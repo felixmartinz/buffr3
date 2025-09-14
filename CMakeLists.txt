@@ -43,8 +43,16 @@ target_compile_definitions(Buffr3 PRIVATE
 )
 
 target_link_libraries(Buffr3 PRIVATE
-    juce::juce_audio_utils      # MidiKeyboardComponent, basic meters helper
-    juce::juce_audio_formats    # WAV loading/saving
-    juce::juce_dsp
-    juce::juce_gui_extra
+    juce_audio_basics
+    juce_audio_devices
+    juce_audio_formats
+    juce_audio_plugin_client
+    juce_audio_processors
+    juce_audio_utils
+    juce_core
+    juce_data_structures
+    juce_events
+    juce_graphics
+    juce_gui_basics
+    juce_gui_extra
 )

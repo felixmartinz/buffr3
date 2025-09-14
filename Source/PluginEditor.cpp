@@ -42,6 +42,7 @@ Buffr3AudioProcessorEditor::Buffr3AudioProcessorEditor (Buffr3AudioProcessor& p)
     addAndMakeVisible (passGain);    aPassGain = std::make_unique<Attach> (proc.getAPVTS(), "passGain", passGain);
     addAndMakeVisible (mix);         aMix      = std::make_unique<Attach> (proc.getAPVTS(), "mix", mix);
     addAndMakeVisible (latencyMs);   aLat      = std::make_unique<Attach> (proc.getAPVTS(), "latencyCompMs", latencyMs);
+    addAndMakeVisible (dropHint);  
 
     // Load WAV
     addAndMakeVisible (loadBtn);
@@ -77,7 +78,7 @@ Buffr3AudioProcessorEditor::Buffr3AudioProcessorEditor (Buffr3AudioProcessor& p)
     keyboard.setAvailableRange (24, 108);
     keyboard.setColour (MidiKeyboardComponent::keyDownOverlayColourId, Colours::cyan.withAlpha (0.35f));
     addAndMakeVisible (keyboard);
-    keyboard.setLookAndFeel (&glowKeysLnf);
+    keyboard.setLookAndFeel (&lnf);
 
     // Route on-screen keyboard to the processor
     kbForwarder = std::make_unique<KBForwarder> (proc);

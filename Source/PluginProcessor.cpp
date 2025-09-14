@@ -35,14 +35,21 @@ Buffr3AudioProcessor::Buffr3AudioProcessor()
 
 bool Buffr3AudioProcessor::isBusesLayoutSupported (const juce::AudioProcessor::BusesLayout& layouts) const
 {
-    const auto in  = layouts.getMainInputChannelSet();
-    const auto out = layouts.getMainOutputChannelSet();
+    const auto& in  = layouts.getMainInputChannelSet();
+    const auto& out = layouts.getMainOutputChannelSet();
 
-    // Allow mono or stereo, and require matching in/out
+    // Require input & output enabled, and same channel count (effect plugin)
     if (in.isDisabled() || out.isDisabled())
         return false;
 
-    return (in == out) && (in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo());
+    // Allow mono or stereo, but must match on in/out
+    if (in != out)
+        return false;
+
+    if (! (in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo()))
+        return false;
+
+    return true;
 }
 
 
@@ -110,13 +117,14 @@ void Buffr3AudioProcessor::setStateInformation (const void* data, int sizeInByte
     if (hadUserSample && blobSize > 0)
     {
         HeapBlock<char> tmp (blobSize);
-        mis.read (tmp.getData(), (size_t) blobSize);
+        mis.read (tmp.getData(), static_cast<size_t>(blobSize));
         MemoryInputStream aos (tmp.getData(), (size_t) blobSize, false);
         const int ch   = aos.readInt();
         const int nSam = aos.readInt();
         snapBuffer.setSize (std::max (1, ch), std::min (nSam, maxSamples4s));
         for (int c = 0; c < snapBuffer.getNumChannels(); ++c)
-            aos.read (snapBuffer.getWritePointer (c), sizeof(float) * (size_t) snapBuffer.getNumSamples());
+            mis.read (snapBuffer.getWritePointer (c),
+                     static_cast<size_t>(sizeof(float) * blobSize));
         userSampleLoaded = true;
     }
 }
